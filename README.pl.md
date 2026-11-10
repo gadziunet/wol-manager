@@ -36,9 +36,9 @@ services:
     container_name: wol
     restart: unless-stopped
     network_mode: host
-    user: "65532:65532"
     read_only: true
     cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]
     security_opt: ["no-new-privileges:true"]
     environment:
       WOL_ADDR: ":8080"
@@ -84,6 +84,7 @@ Bez hosta i sprawdzania aplikacja nie wie, czy komputer wstał. Wysyła wtedy tr
 | `WOL_TRUST_PROXY` | `false` | Ufaj `X-Forwarded-For` i `X-Forwarded-Host` z reverse proxy |
 | `WOL_PORTS` | `9,7` | Porty UDP, na które idzie magic packet |
 | `WOL_STATUS_INTERVAL` | `15s` | Jak często odświeżać stan online (minimum `5s`) |
+| `WOL_UID` / `WOL_GID` | `65532` | Użytkownik i grupa, na które aplikacja przełącza się po starcie (nie może być 0) |
 
 ## Bezpieczeństwo
 
@@ -96,6 +97,7 @@ Bez hosta i sprawdzania aplikacja nie wie, czy komputer wstał. Wysyła wtedy tr
       reverse_proxy 127.0.0.1:8080
   }
   ```
+- Kontener na chwilę startuje jako root tylko po to, żeby przekazać `/data` nieuprzywilejowanemu użytkownikowi (`65532`), po czym przełącza się na niego, zanim otworzy jakikolwiek port. Nie zachowuje żadnych uprawnień i nie może odzyskać roota. Do tego kontener potrzebuje uprawnień `CHOWN`, `SETUID` i `SETGID` (ustawionych już w pliku Compose powyżej) i niczego więcej.
 - Hasła są zapisane jako PBKDF2-HMAC-SHA256 (600 000 iteracji) z losową solą. Tokeny sesji są losowe, przechowywane tylko jako hashe i wygasają po 30 dniach. Ciasteczko ma `HttpOnly` i `SameSite=Strict`.
 - Po 5 nieudanych logowaniach adres jest blokowany na 15 minut.
 - Żądania zmieniające dane muszą być JSON-em z tego samego originu. Ścisła polityka CSP zabrania skryptów inline.
@@ -125,6 +127,7 @@ Gdy ping jest niedostępny, log o tym informuje i używane są porty TCP.
 3. Używaj kabla. Budzenie przez Wi-Fi działa tylko na niektórych kartach.
 4. Po kliknięciu *Wybudź* otwórz **Szczegóły** na karcie urządzenia. Widać tam każdy wypróbowany cel. Wypróbuj metody po kolei w ustawieniach zaawansowanych, żeby znaleźć tę, która działa w Twojej sieci.
 5. Upewnij się, że aplikacja działa w tej samej sieci co komputer. Pakiety broadcast nie przechodzą przez routery, o ile router nie jest skonfigurowany do ich przekazywania.
+6. Jeśli w logu jest `permission denied` dla `/data` albo błąd `setuid`/`setgid`, kontenerowi brakuje tych trzech uprawnień (`cap_add: [CHOWN, SETUID, SETGID]` razem z `cap_drop: [ALL]`).
 
 ## Ograniczenia
 

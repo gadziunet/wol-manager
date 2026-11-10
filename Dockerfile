@@ -12,7 +12,8 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags=
 FROM scratch
 COPY --from=build --chown=65532:65532 /out/data /data
 COPY --from=build /out/wol /wol
-USER 65532:65532
+# Starts as root only to hand /data to the unprivileged user, then switches to
+# it (WOL_UID/WOL_GID, default 65532) before opening any network port.
 ENV WOL_ADDR=:8080 WOL_DATA=/data
 VOLUME ["/data"]
 EXPOSE 8080

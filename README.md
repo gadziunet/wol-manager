@@ -36,9 +36,9 @@ services:
     container_name: wol
     restart: unless-stopped
     network_mode: host
-    user: "65532:65532"
     read_only: true
     cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]
     security_opt: ["no-new-privileges:true"]
     environment:
       WOL_ADDR: ":8080"
@@ -84,6 +84,7 @@ Without a host and a check the app cannot tell whether the computer woke up. It 
 | `WOL_TRUST_PROXY` | `false` | Trust `X-Forwarded-For` and `X-Forwarded-Host` from a reverse proxy |
 | `WOL_PORTS` | `9,7` | UDP ports the magic packet is sent to |
 | `WOL_STATUS_INTERVAL` | `15s` | How often online status is refreshed (minimum `5s`) |
+| `WOL_UID` / `WOL_GID` | `65532` | User and group the app switches to after startup (must not be 0) |
 
 ## Security
 
@@ -96,6 +97,7 @@ Without a host and a check the app cannot tell whether the computer woke up. It 
       reverse_proxy 127.0.0.1:8080
   }
   ```
+- The container starts as root for a moment only to hand `/data` to an unprivileged user (`65532`), then switches to that user before opening any port. It keeps no privileges and cannot regain root. For this the container needs the `CHOWN`, `SETUID` and `SETGID` capabilities (already set in the Compose file above), and nothing else.
 - Passwords are stored as PBKDF2-HMAC-SHA256 (600,000 iterations) with a random salt. Session tokens are random, stored only as hashes and expire after 30 days. The cookie is `HttpOnly` and `SameSite=Strict`.
 - After 5 failed logins an address is blocked for 15 minutes.
 - Requests that change anything must be JSON from the same origin. A strict Content Security Policy forbids inline scripts.
@@ -125,6 +127,7 @@ If ping is not available the log says so and TCP ports are used instead.
 3. Prefer a wired connection. Waking over Wi-Fi works only on some cards.
 4. Open **Details** on the device card after pressing *Wake*. It lists every target that was tried. Try the methods one by one in the advanced settings to find the one that works in your network.
 5. Make sure the app runs in the same network as the computer. Broadcast packets do not cross routers unless the router is configured to forward them.
+6. If the log says `permission denied` for `/data`, or `setuid`/`setgid` fails, the container is missing those three capabilities (`cap_add: [CHOWN, SETUID, SETGID]` together with `cap_drop: [ALL]`).
 
 ## Limitations
 

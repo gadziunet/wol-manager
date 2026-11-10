@@ -5,10 +5,14 @@ services:
     restart: unless-stopped
     # Required: broadcast packets must leave through the real network interfaces.
     network_mode: host
-    user: "65532:65532"
     read_only: true
+    # Root only at startup: the app hands /data to user 65532 and switches to it.
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
     security_opt:
       - no-new-privileges:true
     environment:

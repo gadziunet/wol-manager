@@ -85,6 +85,10 @@ func runServer() int {
 		log.Printf("configuration error: %v", err)
 		return 2
 	}
+	if err := dropPrivileges(cfg.DataDir, cfg.UID, cfg.GID); err != nil {
+		log.Printf("dropping privileges: %v", err)
+		return 1
+	}
 	st, err := openStore(cfg.DataDir)
 	if err != nil {
 		log.Printf("opening data directory: %v", err)

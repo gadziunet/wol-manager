@@ -15,6 +15,8 @@ type Config struct {
 	TrustProxy   bool
 	Ports        []int
 	StatusEvery  time.Duration
+	UID          int
+	GID          int
 }
 
 func envOr(key, def string) string {
@@ -80,5 +82,22 @@ func loadConfig() (Config, error) {
 	if c.StatusEvery < 5*time.Second {
 		return c, fmt.Errorf("WOL_STATUS_INTERVAL: minimum is 5s")
 	}
+	if c.UID, err = envID("WOL_UID", 65532); err != nil {
+		return c, err
+	}
+	if c.GID, err = envID("WOL_GID", 65532); err != nil {
+		return c, err
+	}
 	return c, nil
+}
+
+// envID reads a numeric user or group id. 0 (root) is refused: the whole point
+// of the id is to run the server without root privileges.
+func envID(key string, def int) (int, error) {
+	v := envOr(key, strconv.Itoa(def))
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 || n > 4294967294 {
+		return 0, fmt.Errorf("%s: expected a number from 1 up, got %q", key, v)
+	}
+	return n, nil
 }
