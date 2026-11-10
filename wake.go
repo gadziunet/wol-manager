@@ -196,7 +196,11 @@ type Manager struct {
 	tracker *Tracker
 	root    context.Context
 	wg      sync.WaitGroup
+	events  *EventLog
 }
+
+// SetEvents makes the manager write wake attempts and results to the log.
+func (m *Manager) SetEvents(l *EventLog) { m.events = l }
 
 func newManager(root context.Context, ports []int, prober hostProber, tracker *Tracker) *Manager {
 	return &Manager{jobs: map[string]*job{}, ports: ports, prober: prober, tracker: tracker, root: root}
@@ -303,6 +307,12 @@ func (m *Manager) record(j *job, attempt int, res []Result) {
 func (m *Manager) run(ctx context.Context, j *job, d Device, mac net.HardwareAddr) {
 	defer m.wg.Done()
 	defer j.cancel()
+	defer func() {
+		m.mu.Lock()
+		state, secs := j.state, int(j.end.Sub(j.start).Seconds())
+		m.mu.Unlock()
+		m.events.Add(Event{Kind: "wake", Code: state, DeviceID: d.ID, Device: d.Name, N: secs})
+	}()
 
 	retry := time.Duration(d.RetrySec) * time.Second
 	deadline := j.start.Add(j.timeout)
@@ -328,6 +338,7 @@ func (m *Manager) run(ctx context.Context, j *job, d Device, mac net.HardwareAdd
 				res = append(res, Result{Method: "unicast", Err: "no IP known"})
 			}
 			m.record(j, attempts, res)
+			m.events.Add(Event{Kind: "wake", Code: "attempt", DeviceID: d.ID, Device: d.Name, N: attempts, Results: res})
 			next = time.Now().Add(retry)
 		}
 		if canDetect && m.prober.Check(ctx, d) {

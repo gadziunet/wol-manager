@@ -20,11 +20,13 @@ An app that sends only one of these, once, fails silently in some setups, and th
 
 - Wake by MAC address with up to three methods at once: limited broadcast on every network interface, directed broadcast, unicast.
 - Retries every few seconds until the computer is online (ping and/or TCP ports) or the timeout is reached.
-- Live progress and a per-attempt list of every packet target and result.
+- Live progress, and a **Logs** tab with every attempt, every packet target and its result.
+- Device **groups** with one button that wakes the whole group, each device with its own settings.
+- Several accounts: administrators and regular users who can only wake and see the devices and groups assigned to them.
 - Online status for each device, refreshed in the background.
 - Per-device settings: methods, network interface, netmask, check ports, timeout, retry interval.
 - Responsive page for phones and desktops, light and dark theme, English and Polish.
-- Account with a hashed password, login rate limiting, strict security headers.
+- Hashed passwords, login rate limiting, strict security headers.
 - Single static binary of about 7 MB. Standard library only, so there is nothing to keep updated except Go itself.
 
 ## Quick start (Docker Compose)
@@ -38,7 +40,7 @@ services:
     network_mode: host
     read_only: true
     cap_drop: [ALL]
-    cap_add: [CHOWN, SETUID, SETGID]
+    cap_add: [CHOWN, SETUID, SETGID, NET_RAW]
     security_opt: ["no-new-privileges:true"]
     environment:
       WOL_ADDR: ":8080"
@@ -74,6 +76,15 @@ Without Docker: `go build -o wol . && ./wol` (Go 1.24 or newer).
 
 Without a host and a check the app cannot tell whether the computer woke up. It then sends three attempts and reports "sent".
 
+## Users, groups and logs
+
+The first account is an administrator. Administrators manage everything in the **Settings** tab:
+
+- **Users.** Add accounts and give each one a role. A *user* can only wake and see the status of the devices assigned to them, directly or through a group, and change their own password. They never see MAC or IP addresses, device settings or the packet targets. An *administrator* can do everything. There is always at least one administrator, and you cannot delete your own account. A new password set by an administrator signs that user out everywhere.
+- **Groups.** A device belongs to at most one group (choose it when editing the device). A group has a **Wake group** button that starts every device in it, each with its own methods, retries and timeout. A regular user wakes only the devices of the group that they are allowed to use.
+
+The **Logs** tab lists wake requests, every attempt with the packets that were sent, and the result (online after N seconds, no response, stopped). Administrators also see logins, failed logins (with the address) and changes to users, groups and devices. Regular users see only the wake events of their own devices. The log is kept in memory (the last 500 events) and starts empty after a restart.
+
 ## Configuration
 
 | Variable | Default | Meaning |
@@ -97,20 +108,20 @@ Without a host and a check the app cannot tell whether the computer woke up. It 
       reverse_proxy 127.0.0.1:8080
   }
   ```
-- The container starts as root for a moment only to hand `/data` to an unprivileged user (`65532`), then switches to that user before opening any port. It keeps no privileges and cannot regain root. For this the container needs the `CHOWN`, `SETUID` and `SETGID` capabilities (already set in the Compose file above), and nothing else.
+- The container starts as root for a moment only to hand `/data` to an unprivileged user (`65532`), then switches to that user before opening any port. It keeps no privileges and cannot regain root. For this the container needs the `CHOWN`, `SETUID` and `SETGID` capabilities (already set in the Compose file above). `NET_RAW` is the only one kept afterwards: it lets the online check send ping without any kernel setting. Remove it if you prefer, and the check will use TCP ports only.
 - Passwords are stored as PBKDF2-HMAC-SHA256 (600,000 iterations) with a random salt. Session tokens are random, stored only as hashes and expire after 30 days. The cookie is `HttpOnly` and `SameSite=Strict`.
 - After 5 failed logins an address is blocked for 15 minutes.
 - Requests that change anything must be JSON from the same origin. A strict Content Security Policy forbids inline scripts.
 - The app never runs external commands and stores no credentials of the computers it wakes.
 - `state.json` has mode `0600` and holds password hashes, so treat it (and its backups) as a secret.
 
-**Lost password:** stop the app, set `"users": []` and `"sessions": []` in `state.json`, start it again and use the new setup token from the log. Devices are kept.
+**Lost administrator password:** stop the app, set `"users": []` and `"sessions": []` in `state.json`, start it again and use the new setup token from the log. All accounts are removed, devices and groups are kept, and the new account is an administrator.
 
 ## Online check
 
 The app pings the computer (ICMP) and optionally connects to TCP ports you list. A TCP port that answers with "connection refused" still counts as online, because only a running machine can refuse.
 
-Ping works without privileges on Linux when the kernel allows it for the user the app runs as:
+In the container ping works out of the box thanks to `NET_RAW` (see the Compose file). Without that capability it works only when the kernel allows it for the user the app runs as:
 
 ```sh
 sysctl net.ipv4.ping_group_range
@@ -125,15 +136,15 @@ If ping is not available the log says so and TCP ports are used instead.
 1. Enable Wake-on-LAN in the BIOS/UEFI (names vary: "Power On By PCI-E", "Resume by LAN") and disable "ErP" or "Deep Sleep" modes.
 2. In the operating system allow the network card to wake the computer. On Windows that is the card's *Power Management* tab, and "Fast startup" should be off.
 3. Prefer a wired connection. Waking over Wi-Fi works only on some cards.
-4. Open **Details** on the device card after pressing *Wake*. It lists every target that was tried. Try the methods one by one in the advanced settings to find the one that works in your network.
+4. After pressing *Wake* open the **Logs** tab. Expand *Packet targets* on an attempt to see every target that was tried. Try the methods one by one in the advanced settings to find the one that works in your network.
 5. Make sure the app runs in the same network as the computer. Broadcast packets do not cross routers unless the router is configured to forward them.
-6. If the log says `permission denied` for `/data`, or `setuid`/`setgid` fails, the container is missing those three capabilities (`cap_add: [CHOWN, SETUID, SETGID]` together with `cap_drop: [ALL]`).
+6. If the log says `permission denied` for `/data`, or `setuid`/`setgid` fails, the container is missing those three capabilities (`cap_add: [CHOWN, SETUID, SETGID, NET_RAW]` together with `cap_drop: [ALL]`).
 
 ## Limitations
 
 - IPv4 only.
 - No mDNS (`.local`) name resolution. DNS names and IP addresses work.
-- One account, created at first start. The password can be changed in the app.
+- Two roles only (administrator and user). Accounts are managed in the app, there is no external login (LDAP, SSO).
 - No built-in HTTPS, use a reverse proxy.
 
 ## Command line

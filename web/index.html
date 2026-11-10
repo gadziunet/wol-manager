@@ -23,6 +23,12 @@
     </div>
   </header>
 
+  <nav id="tabs" class="tabs" hidden aria-label="Sections">
+    <button type="button" class="tab" data-tab="devices" data-i18n="tab_devices"></button>
+    <button type="button" class="tab" data-tab="logs" data-i18n="tab_logs"></button>
+    <button type="button" class="tab" id="tabSettings" data-tab="settings" hidden data-i18n="tab_settings"></button>
+  </nav>
+
   <main id="view" class="wrap"></main>
 
   <dialog id="deviceDialog">
@@ -38,6 +44,10 @@
       <label><span data-i18n="f_host"></span>
         <input name="host" placeholder="192.168.1.50" autocapitalize="off" spellcheck="false">
         <small data-i18n="h_host"></small>
+      </label>
+
+      <label><span data-i18n="f_group"></span>
+        <select name="group"></select>
       </label>
 
       <details>
@@ -76,6 +86,60 @@
         <button type="button" class="btn danger" id="btnDelete" hidden data-i18n="delete"></button>
         <span class="spacer"></span>
         <button type="button" class="btn" id="btnDeviceCancel" data-i18n="cancel"></button>
+        <button type="submit" class="btn primary" data-i18n="save"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="userDialog">
+    <form id="userForm" method="dialog" autocomplete="off">
+      <h2 id="userTitle"></h2>
+      <label><span data-i18n="username"></span>
+        <input name="username" required minlength="3" maxlength="32" autocapitalize="off" spellcheck="false" autocomplete="off">
+      </label>
+      <label><span data-i18n="f_user_password"></span>
+        <input name="password" type="password" maxlength="128" autocomplete="new-password">
+        <small id="userPasswordHint"></small>
+      </label>
+      <label><span data-i18n="f_role"></span>
+        <select name="role">
+          <option value="user" data-i18n="role_user"></option>
+          <option value="admin" data-i18n="role_admin"></option>
+        </select>
+        <small data-i18n="h_role"></small>
+      </label>
+      <div id="userAccess">
+        <fieldset>
+          <legend data-i18n="f_user_groups"></legend>
+          <div id="userGroups" class="checks"></div>
+        </fieldset>
+        <fieldset>
+          <legend data-i18n="f_user_devices"></legend>
+          <div id="userDevices" class="checks"></div>
+        </fieldset>
+      </div>
+      <p class="err" id="userError" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn danger" id="btnUserDelete" hidden data-i18n="delete"></button>
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="btnUserCancel" data-i18n="cancel"></button>
+        <button type="submit" class="btn primary" data-i18n="save"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="groupDialog">
+    <form id="groupForm" method="dialog" autocomplete="off">
+      <h2 id="groupTitle"></h2>
+      <label><span data-i18n="f_group_name"></span>
+        <input name="name" required maxlength="40">
+        <small data-i18n="h_group"></small>
+      </label>
+      <p class="err" id="groupError" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn danger" id="btnGroupDelete" hidden data-i18n="delete"></button>
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="btnGroupCancel" data-i18n="cancel"></button>
         <button type="submit" class="btn primary" data-i18n="save"></button>
       </div>
     </form>

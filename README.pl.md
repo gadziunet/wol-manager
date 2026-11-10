@@ -20,11 +20,13 @@ Aplikacja, która wysyła tylko jeden z tych sposobów i tylko raz, w niektóryc
 
 - Budzenie po adresie MAC maksymalnie trzema metodami naraz: broadcast ogólny przez każdy interfejs sieciowy, broadcast kierowany, unicast.
 - Ponawianie co kilka sekund, aż komputer wstanie (ping i/lub porty TCP) albo minie limit czasu.
-- Postęp na żywo i lista każdego celu pakietu z wynikiem w każdej próbie.
+- Postęp na żywo oraz zakładka **Logi** z każdą próbą, każdym celem pakietu i jego wynikiem.
+- **Grupy** urządzeń z jednym przyciskiem, który budzi całą grupę, każde urządzenie według własnych ustawień.
+- Wiele kont: administratorzy i zwykli użytkownicy, którzy mogą tylko budzić i widzieć przypisane im urządzenia i grupy.
 - Stan online każdego urządzenia, odświeżany w tle.
 - Ustawienia per urządzenie: metody, interfejs sieciowy, maska, porty do sprawdzania, limit czasu, odstęp ponawiania.
 - Strona dopasowana do telefonu i komputera, jasny i ciemny motyw, polski i angielski.
-- Konto z zahashowanym hasłem, ograniczanie prób logowania, ścisłe nagłówki bezpieczeństwa.
+- Zahashowane hasła, ograniczanie prób logowania, ścisłe nagłówki bezpieczeństwa.
 - Jeden statyczny plik ok. 7 MB. Tylko biblioteka standardowa, więc nie ma nic do aktualizowania poza samym Go.
 
 ## Szybki start (Docker Compose)
@@ -38,7 +40,7 @@ services:
     network_mode: host
     read_only: true
     cap_drop: [ALL]
-    cap_add: [CHOWN, SETUID, SETGID]
+    cap_add: [CHOWN, SETUID, SETGID, NET_RAW]
     security_opt: ["no-new-privileges:true"]
     environment:
       WOL_ADDR: ":8080"
@@ -74,6 +76,15 @@ Bez Dockera: `go build -o wol . && ./wol` (Go 1.24 lub nowsze).
 
 Bez hosta i sprawdzania aplikacja nie wie, czy komputer wstał. Wysyła wtedy trzy próby i zgłasza „wysłano”.
 
+## Użytkownicy, grupy i logi
+
+Pierwsze konto jest administratorem. Administrator zarządza wszystkim w zakładce **Ustawienia**:
+
+- **Użytkownicy.** Dodajesz konta i nadajesz im rolę. *Użytkownik* może tylko budzić i widzieć stan urządzeń przypisanych mu bezpośrednio lub przez grupę oraz zmieniać własne hasło. Nie widzi adresów MAC ani IP, ustawień urządzeń ani celów pakietów. *Administrator* może wszystko. Zawsze zostaje co najmniej jeden administrator i nie można usunąć własnego konta. Nowe hasło ustawione przez administratora wylogowuje tego użytkownika wszędzie.
+- **Grupy.** Urządzenie należy najwyżej do jednej grupy (wybierasz ją przy edycji urządzenia). Grupa ma przycisk **Wybudź grupę**, który uruchamia każde jej urządzenie z jego własnymi metodami, ponawianiem i limitem czasu. Zwykły użytkownik budzi tylko te urządzenia z grupy, do których ma dostęp.
+
+Zakładka **Logi** pokazuje prośby o budzenie, każdą próbę z wysłanymi pakietami oraz wynik (wstał po N sekundach, brak odpowiedzi, zatrzymano). Administrator widzi też logowania, nieudane logowania (z adresem) i zmiany użytkowników, grup i urządzeń. Zwykły użytkownik widzi tylko zdarzenia budzenia własnych urządzeń. Log jest w pamięci (ostatnie 500 zdarzeń) i po restarcie zaczyna od zera.
+
 ## Konfiguracja
 
 | Zmienna | Domyślnie | Znaczenie |
@@ -97,20 +108,20 @@ Bez hosta i sprawdzania aplikacja nie wie, czy komputer wstał. Wysyła wtedy tr
       reverse_proxy 127.0.0.1:8080
   }
   ```
-- Kontener na chwilę startuje jako root tylko po to, żeby przekazać `/data` nieuprzywilejowanemu użytkownikowi (`65532`), po czym przełącza się na niego, zanim otworzy jakikolwiek port. Nie zachowuje żadnych uprawnień i nie może odzyskać roota. Do tego kontener potrzebuje uprawnień `CHOWN`, `SETUID` i `SETGID` (ustawionych już w pliku Compose powyżej) i niczego więcej.
+- Kontener na chwilę startuje jako root tylko po to, żeby przekazać `/data` nieuprzywilejowanemu użytkownikowi (`65532`), po czym przełącza się na niego, zanim otworzy jakikolwiek port. Nie zachowuje żadnych uprawnień i nie może odzyskać roota. Do tego kontener potrzebuje uprawnień `CHOWN`, `SETUID` i `SETGID` (ustawionych już w pliku Compose powyżej). Po starcie zostaje tylko `NET_RAW`: dzięki niemu sprawdzanie stanu może wysyłać ping bez żadnych ustawień jądra. Możesz je usunąć, a sprawdzanie użyje wtedy tylko portów TCP.
 - Hasła są zapisane jako PBKDF2-HMAC-SHA256 (600 000 iteracji) z losową solą. Tokeny sesji są losowe, przechowywane tylko jako hashe i wygasają po 30 dniach. Ciasteczko ma `HttpOnly` i `SameSite=Strict`.
 - Po 5 nieudanych logowaniach adres jest blokowany na 15 minut.
 - Żądania zmieniające dane muszą być JSON-em z tego samego originu. Ścisła polityka CSP zabrania skryptów inline.
 - Aplikacja nie uruchamia zewnętrznych poleceń i nie przechowuje żadnych danych dostępowych do budzonych komputerów.
 - `state.json` ma uprawnienia `0600` i zawiera hashe haseł, więc traktuj go (i jego kopie zapasowe) jak sekret.
 
-**Zapomniane hasło:** zatrzymaj aplikację, ustaw w `state.json` `"users": []` i `"sessions": []`, uruchom ją ponownie i użyj nowego tokenu konfiguracji z logu. Urządzenia zostają.
+**Zapomniane hasło administratora:** zatrzymaj aplikację, ustaw w `state.json` `"users": []` i `"sessions": []`, uruchom ją ponownie i użyj nowego tokenu konfiguracji z logu. Wszystkie konta są usuwane, urządzenia i grupy zostają, a nowe konto jest administratorem.
 
 ## Sprawdzanie stanu
 
 Aplikacja pinguje komputer (ICMP) i opcjonalnie łączy się z portami TCP z Twojej listy. Port TCP, który odpowiada „połączenie odrzucone”, też oznacza, że komputer działa, bo odmówić może tylko działająca maszyna.
 
-Ping działa bez uprawnień na Linuksie, jeśli jądro na to pozwala użytkownikowi, jako którego działa aplikacja:
+W kontenerze ping działa od razu dzięki `NET_RAW` (patrz plik Compose). Bez tego uprawnienia działa tylko wtedy, gdy jądro pozwala na to użytkownikowi, jako którego działa aplikacja:
 
 ```sh
 sysctl net.ipv4.ping_group_range
@@ -125,15 +136,15 @@ Gdy ping jest niedostępny, log o tym informuje i używane są porty TCP.
 1. Włącz Wake-on-LAN w BIOS/UEFI (nazwy bywają różne: „Power On By PCI-E”, „Resume by LAN”) i wyłącz tryby „ErP” lub „Deep Sleep”.
 2. W systemie pozwól karcie sieciowej wybudzać komputer. W Windows to zakładka *Zarządzanie energią* karty, a „Szybkie uruchamianie” powinno być wyłączone.
 3. Używaj kabla. Budzenie przez Wi-Fi działa tylko na niektórych kartach.
-4. Po kliknięciu *Wybudź* otwórz **Szczegóły** na karcie urządzenia. Widać tam każdy wypróbowany cel. Wypróbuj metody po kolei w ustawieniach zaawansowanych, żeby znaleźć tę, która działa w Twojej sieci.
+4. Po kliknięciu *Wybudź* otwórz zakładkę **Logi**. Rozwiń *Cele pakietów* przy próbie, żeby zobaczyć każdy wypróbowany cel. Wypróbuj metody po kolei w ustawieniach zaawansowanych, żeby znaleźć tę, która działa w Twojej sieci.
 5. Upewnij się, że aplikacja działa w tej samej sieci co komputer. Pakiety broadcast nie przechodzą przez routery, o ile router nie jest skonfigurowany do ich przekazywania.
-6. Jeśli w logu jest `permission denied` dla `/data` albo błąd `setuid`/`setgid`, kontenerowi brakuje tych trzech uprawnień (`cap_add: [CHOWN, SETUID, SETGID]` razem z `cap_drop: [ALL]`).
+6. Jeśli w logu jest `permission denied` dla `/data` albo błąd `setuid`/`setgid`, kontenerowi brakuje tych trzech uprawnień (`cap_add: [CHOWN, SETUID, SETGID, NET_RAW]` razem z `cap_drop: [ALL]`).
 
 ## Ograniczenia
 
 - Tylko IPv4.
 - Brak rozwiązywania nazw mDNS (`.local`). Nazwy DNS i adresy IP działają.
-- Jedno konto, tworzone przy pierwszym uruchomieniu. Hasło można zmienić w aplikacji.
+- Tylko dwie role (administrator i użytkownik). Konta zarządza się w aplikacji, nie ma zewnętrznego logowania (LDAP, SSO).
 - Brak wbudowanego HTTPS, użyj reverse proxy.
 
 ## Wiersz poleceń

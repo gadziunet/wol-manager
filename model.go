@@ -13,6 +13,7 @@ var (
 	hostRe  = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
 	ifaceRe = regexp.MustCompile(`^[a-zA-Z0-9_.:@-]{1,15}$`)
 	userRe  = regexp.MustCompile(`^[a-z0-9_.-]{3,32}$`)
+	idRe    = regexp.MustCompile(`^[a-f0-9]{16}$`)
 )
 
 type Methods struct {
@@ -34,6 +35,7 @@ type Device struct {
 	TimeoutSec int     `json:"timeoutSec"`
 	RetrySec   int     `json:"retrySec"`
 	LastIP     string  `json:"lastIp,omitempty"`
+	Group      string  `json:"group"`
 }
 
 type deviceInput struct {
@@ -47,6 +49,7 @@ type deviceInput struct {
 	ICMP       *bool    `json:"icmp"`
 	TimeoutSec int      `json:"timeoutSec"`
 	RetrySec   int      `json:"retrySec"`
+	Group      string   `json:"group"`
 }
 
 type fieldError struct {
@@ -155,6 +158,11 @@ func (in deviceInput) device() (Device, error) {
 	}
 	if d.RetrySec < 2 || d.RetrySec > 60 {
 		return d, bad("invalid_retry", "retrySec")
+	}
+
+	d.Group = strings.TrimSpace(in.Group)
+	if d.Group != "" && !idRe.MatchString(d.Group) {
+		return d, bad("invalid_group", "group")
 	}
 	return d, nil
 }

@@ -19,14 +19,50 @@ var (
 	errNotFound  = errors.New("not found")
 	errDupMAC    = errors.New("duplicate mac")
 	errTooMany   = errors.New("too many devices")
+	errLimit     = errors.New("limit reached")
+	errDupUser   = errors.New("duplicate user")
+	errDupGroup  = errors.New("duplicate group")
+	errLastAdmin = errors.New("last administrator")
+	errBadRef    = errors.New("unknown device or group")
 )
 
 const maxSessionsPerUser = 20
 
+const (
+	roleAdmin = "admin"
+	roleUser  = "user"
+	maxUsers  = 50
+	maxGroups = 50
+)
+
+// User is an account. An empty Role (accounts created before roles existed)
+// counts as administrator. A regular user can only wake and see the devices
+// assigned to them directly (Devices) or through a group (Groups).
 type User struct {
 	Name    string    `json:"name"`
 	Hash    string    `json:"hash"`
 	Created time.Time `json:"created"`
+	Role    string    `json:"role,omitempty"`
+	Devices []string  `json:"devices,omitempty"`
+	Groups  []string  `json:"groups,omitempty"`
+}
+
+func (u User) IsAdmin() bool { return u.Role != roleUser }
+
+// canUse reports whether the user may wake and see the device.
+func (u User) canUse(d Device) bool {
+	if u.IsAdmin() {
+		return true
+	}
+	if slices.Contains(u.Devices, d.ID) {
+		return true
+	}
+	return d.Group != "" && slices.Contains(u.Groups, d.Group)
+}
+
+type Group struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type Session struct {
@@ -41,6 +77,7 @@ type state struct {
 	Users    []User    `json:"users"`
 	Sessions []Session `json:"sessions"`
 	Devices  []Device  `json:"devices"`
+	Groups   []Group   `json:"groups"`
 }
 
 type Store struct {
@@ -112,6 +149,7 @@ func (s *Store) update(fn func(st *state) error) error {
 		Users:    slices.Clone(s.st.Users),
 		Sessions: slices.Clone(s.st.Sessions),
 		Devices:  slices.Clone(s.st.Devices),
+		Groups:   slices.Clone(s.st.Groups),
 	}
 	if err := fn(&next); err != nil {
 		return err
@@ -142,7 +180,7 @@ func (s *Store) CreateFirstUser(name, hash string) error {
 		if len(st.Users) > 0 {
 			return errSetupDone
 		}
-		st.Users = append(st.Users, User{Name: name, Hash: hash, Created: time.Now().UTC()})
+		st.Users = append(st.Users, User{Name: name, Hash: hash, Created: time.Now().UTC(), Role: roleAdmin})
 		return nil
 	})
 }
@@ -200,6 +238,9 @@ func (s *Store) AddDevice(d Device) (Device, error) {
 		if len(st.Devices) >= maxDevices {
 			return errTooMany
 		}
+		if d.Group != "" && !hasGroup(st, d.Group) {
+			return errBadRef
+		}
 		for _, x := range st.Devices {
 			if x.MAC == d.MAC {
 				return errDupMAC
@@ -213,6 +254,9 @@ func (s *Store) AddDevice(d Device) (Device, error) {
 
 func (s *Store) UpdateDevice(d Device) error {
 	return s.update(func(st *state) error {
+		if d.Group != "" && !hasGroup(st, d.Group) {
+			return errBadRef
+		}
 		idx := -1
 		for i, x := range st.Devices {
 			if x.ID == d.ID {
@@ -238,6 +282,11 @@ func (s *Store) DeleteDevice(id string) error {
 		st.Devices = slices.DeleteFunc(st.Devices, func(d Device) bool { return d.ID == id })
 		if len(st.Devices) == n {
 			return errNotFound
+		}
+		for i := range st.Users {
+			if slices.Contains(st.Users[i].Devices, id) {
+				st.Users[i].Devices = slices.DeleteFunc(slices.Clone(st.Users[i].Devices), func(x string) bool { return x == id })
+			}
 		}
 		return nil
 	})

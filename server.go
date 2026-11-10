@@ -31,6 +31,7 @@ type Server struct {
 	wakes   *Manager
 	tracker *Tracker
 	lim     *limiter
+	events  *EventLog
 
 	mu         sync.Mutex
 	setupToken string
@@ -45,7 +46,9 @@ func newServer(cfg Config, st *Store, wakes *Manager, tracker *Tracker) *Server 
 		wakes:   wakes,
 		tracker: tracker,
 		lim:     newLimiter(5, 15*time.Minute, 15*time.Minute),
+		events:  newEventLog(),
 	}
+	wakes.SetEvents(s.events)
 	if !st.HasUsers() {
 		s.setupToken = newToken()[:22]
 	}
@@ -182,6 +185,7 @@ func (s *Server) secure(next http.Handler) http.Handler {
 type authInfo struct {
 	User      string
 	TokenHash string
+	Account   User
 }
 
 func (s *Server) session(r *http.Request) (authInfo, bool) {
@@ -194,7 +198,22 @@ func (s *Server) session(r *http.Request) (authInfo, bool) {
 	if !ok {
 		return authInfo{}, false
 	}
-	return authInfo{User: user, TokenHash: h}, true
+	acc, ok := s.store.User(user)
+	if !ok {
+		return authInfo{}, false
+	}
+	return authInfo{User: user, TokenHash: h, Account: acc}, true
+}
+
+// admin lets only administrators through.
+func (s *Server) admin(next func(http.ResponseWriter, *http.Request, authInfo)) http.HandlerFunc {
+	return s.auth(func(w http.ResponseWriter, r *http.Request, a authInfo) {
+		if !a.Account.IsAdmin() {
+			fail(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		next(w, r, a)
+	})
 }
 
 func (s *Server) auth(next func(http.ResponseWriter, *http.Request, authInfo)) http.HandlerFunc {
@@ -249,13 +268,23 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("POST /api/logout", s.auth(s.handleLogout))
 	mux.HandleFunc("POST /api/password", s.auth(s.handlePassword))
-	mux.HandleFunc("GET /api/interfaces", s.auth(s.handleInterfaces))
+	mux.HandleFunc("GET /api/interfaces", s.admin(s.handleInterfaces))
 	mux.HandleFunc("GET /api/devices", s.auth(s.handleDevices))
-	mux.HandleFunc("POST /api/devices", s.auth(s.handleDeviceCreate))
-	mux.HandleFunc("PUT /api/devices/{id}", s.auth(s.handleDeviceUpdate))
-	mux.HandleFunc("DELETE /api/devices/{id}", s.auth(s.handleDeviceDelete))
+	mux.HandleFunc("POST /api/devices", s.admin(s.handleDeviceCreate))
+	mux.HandleFunc("PUT /api/devices/{id}", s.admin(s.handleDeviceUpdate))
+	mux.HandleFunc("DELETE /api/devices/{id}", s.admin(s.handleDeviceDelete))
 	mux.HandleFunc("POST /api/devices/{id}/wake", s.auth(s.handleWake))
 	mux.HandleFunc("POST /api/devices/{id}/wake/cancel", s.auth(s.handleWakeCancel))
+	mux.HandleFunc("GET /api/groups", s.auth(s.handleGroups))
+	mux.HandleFunc("POST /api/groups", s.admin(s.handleGroupCreate))
+	mux.HandleFunc("PUT /api/groups/{id}", s.admin(s.handleGroupRename))
+	mux.HandleFunc("DELETE /api/groups/{id}", s.admin(s.handleGroupDelete))
+	mux.HandleFunc("POST /api/groups/{id}/wake", s.auth(s.handleGroupWake))
+	mux.HandleFunc("GET /api/users", s.admin(s.handleUsers))
+	mux.HandleFunc("POST /api/users", s.admin(s.handleUserCreate))
+	mux.HandleFunc("PUT /api/users/{name}", s.admin(s.handleUserUpdate))
+	mux.HandleFunc("DELETE /api/users/{name}", s.admin(s.handleUserDelete))
+	mux.HandleFunc("GET /api/logs", s.auth(s.handleLogs))
 
 	sub, err := fs.Sub(webFS, "web")
 	if err != nil {
@@ -279,6 +308,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"authenticated": ok,
 		"user":          a.User,
+		"role":          roleOf(a.Account),
 		"setupRequired": !s.store.HasUsers(),
 		"version":       version,
 	})
@@ -371,6 +401,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !valid {
 		s.lim.fail(ip, time.Now())
 		log.Printf("login: failed attempt from %s", ip)
+		s.events.Add(Event{Kind: "auth", Code: "login_failed", User: name, IP: ip})
 		fail(w, http.StatusUnauthorized, "bad_credentials")
 		return
 	}
@@ -380,6 +411,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, "internal")
 		return
 	}
+	s.events.Add(Event{Kind: "auth", Code: "login_ok", User: user.Name, IP: ip})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": user.Name})
 }
 
@@ -423,6 +455,7 @@ func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request, a authIn
 		return
 	}
 	s.lim.reset(ip)
+	s.events.Add(Event{Kind: "auth", Code: "password_changed", User: a.User, IP: ip})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -452,14 +485,27 @@ func (s *Server) view(d Device, now time.Time) deviceView {
 	return deviceView{Device: d, Status: s.tracker.View(d.ID, now), Wake: s.wakes.State(d.ID)}
 }
 
-func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request, _ authInfo) {
+func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request, a authInfo) {
 	now := time.Now()
 	devs := s.store.Devices()
 	out := make([]deviceView, 0, len(devs))
 	for _, d := range devs {
-		out = append(out, s.view(d, now))
+		if a.Account.canUse(d) {
+			out = append(out, s.viewFor(a.Account, d, now))
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// viewFor hides everything about a device that a regular user does not need:
+// addresses, wake settings and the list of packet targets.
+func (s *Server) viewFor(acc User, d Device, now time.Time) deviceView {
+	v := s.view(d, now)
+	if !acc.IsAdmin() {
+		v.Device = Device{ID: d.ID, Name: d.Name, Group: d.Group, CheckPorts: []int{}}
+		v.Wake.Last = []Result{}
+	}
+	return v
 }
 
 func (s *Server) storeError(w http.ResponseWriter, err error) {
@@ -470,13 +516,23 @@ func (s *Server) storeError(w http.ResponseWriter, err error) {
 		fail(w, http.StatusConflict, "too_many_devices")
 	case errors.Is(err, errNotFound):
 		fail(w, http.StatusNotFound, "not_found")
+	case errors.Is(err, errLimit):
+		fail(w, http.StatusConflict, "limit_reached")
+	case errors.Is(err, errDupUser):
+		fail(w, http.StatusConflict, "duplicate_user")
+	case errors.Is(err, errDupGroup):
+		fail(w, http.StatusConflict, "duplicate_group")
+	case errors.Is(err, errLastAdmin):
+		fail(w, http.StatusConflict, "last_admin")
+	case errors.Is(err, errBadRef):
+		fail(w, http.StatusBadRequest, "invalid_reference")
 	default:
 		log.Printf("store: %v", err)
 		fail(w, http.StatusInternalServerError, "internal")
 	}
 }
 
-func (s *Server) handleDeviceCreate(w http.ResponseWriter, r *http.Request, _ authInfo) {
+func (s *Server) handleDeviceCreate(w http.ResponseWriter, r *http.Request, a authInfo) {
 	var in deviceInput
 	if !decodeJSON(w, r, &in) {
 		return
@@ -491,10 +547,11 @@ func (s *Server) handleDeviceCreate(w http.ResponseWriter, r *http.Request, _ au
 		s.storeError(w, err)
 		return
 	}
+	s.events.Add(Event{Kind: "admin", Code: "device_added", User: a.User, DeviceID: d.ID, Device: d.Name})
 	writeJSON(w, http.StatusCreated, s.view(d, time.Now()))
 }
 
-func (s *Server) handleDeviceUpdate(w http.ResponseWriter, r *http.Request, _ authInfo) {
+func (s *Server) handleDeviceUpdate(w http.ResponseWriter, r *http.Request, a authInfo) {
 	id := r.PathValue("id")
 	var in deviceInput
 	if !decodeJSON(w, r, &in) {
@@ -511,32 +568,40 @@ func (s *Server) handleDeviceUpdate(w http.ResponseWriter, r *http.Request, _ au
 		return
 	}
 	d, _ = s.store.Device(id)
+	s.events.Add(Event{Kind: "admin", Code: "device_changed", User: a.User, DeviceID: d.ID, Device: d.Name})
 	writeJSON(w, http.StatusOK, s.view(d, time.Now()))
 }
 
-func (s *Server) handleDeviceDelete(w http.ResponseWriter, r *http.Request, _ authInfo) {
+func (s *Server) handleDeviceDelete(w http.ResponseWriter, r *http.Request, a authInfo) {
 	id := r.PathValue("id")
+	old, _ := s.store.Device(id)
 	if err := s.store.DeleteDevice(id); err != nil {
 		s.storeError(w, err)
 		return
 	}
 	s.wakes.Forget(id)
+	s.events.Add(Event{Kind: "admin", Code: "device_deleted", User: a.User, Device: old.Name})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Server) handleWake(w http.ResponseWriter, r *http.Request, a authInfo) {
 	d, ok := s.store.Device(r.PathValue("id"))
-	if !ok {
+	if !ok || !a.Account.canUse(d) {
 		fail(w, http.StatusNotFound, "not_found")
 		return
 	}
 	log.Printf("wake: %q requested by %s", d.Name, a.User)
-	writeJSON(w, http.StatusAccepted, s.wakes.Start(d))
+	s.events.Add(Event{Kind: "wake", Code: "requested", User: a.User, DeviceID: d.ID, Device: d.Name})
+	st := s.wakes.Start(d)
+	if !a.Account.IsAdmin() {
+		st.Last = []Result{}
+	}
+	writeJSON(w, http.StatusAccepted, st)
 }
 
-func (s *Server) handleWakeCancel(w http.ResponseWriter, r *http.Request, _ authInfo) {
+func (s *Server) handleWakeCancel(w http.ResponseWriter, r *http.Request, a authInfo) {
 	id := r.PathValue("id")
-	if _, ok := s.store.Device(id); !ok {
+	if d, ok := s.store.Device(id); !ok || !a.Account.canUse(d) {
 		fail(w, http.StatusNotFound, "not_found")
 		return
 	}
