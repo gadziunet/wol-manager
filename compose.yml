@@ -1,0 +1,23 @@
+services:
+  wol:
+    build: .
+    container_name: wol
+    restart: unless-stopped
+    # Required: broadcast packets must leave through the real network interfaces.
+    network_mode: host
+    user: "65532:65532"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      WOL_ADDR: ":8080"
+      # Behind an HTTPS reverse proxy, also set:
+      # WOL_COOKIE_SECURE: "true"
+      # WOL_TRUST_PROXY: "true"
+    volumes:
+      - wol-data:/data
+
+volumes:
+  wol-data:

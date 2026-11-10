@@ -1,0 +1,6 @@
+/wol
+/wol.exe
+/data/
+*.db
+*.log
+.env

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Wake on LAN</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="bar">
+    <h1 class="brand">Wake on LAN</h1>
+    <div class="bar-actions">
+      <button type="button" id="btnAdd" class="btn primary" hidden data-i18n="add"></button>
+      <button type="button" id="btnPassword" class="btn" hidden data-i18n="password"></button>
+      <button type="button" id="btnLogout" class="btn" hidden data-i18n="logout"></button>
+      <select id="lang" class="lang" aria-label="Language">
+        <option value="en">EN</option>
+        <option value="pl">PL</option>
+      </select>
+    </div>
+  </header>
+
+  <main id="view" class="wrap"></main>
+
+  <dialog id="deviceDialog">
+    <form id="deviceForm" method="dialog" autocomplete="off">
+      <h2 id="deviceTitle"></h2>
+
+      <label><span data-i18n="f_name"></span>
+        <input name="name" required maxlength="80">
+      </label>
+      <label><span data-i18n="f_mac"></span>
+        <input name="mac" required placeholder="AA:BB:CC:DD:EE:FF" inputmode="text" autocapitalize="off" spellcheck="false">
+      </label>
+      <label><span data-i18n="f_host"></span>
+        <input name="host" placeholder="192.168.1.50" autocapitalize="off" spellcheck="false">
+        <small data-i18n="h_host"></small>
+      </label>
+
+      <details>
+        <summary data-i18n="advanced"></summary>
+        <label><span data-i18n="f_netmask"></span>
+          <input name="netmask" placeholder="255.255.255.0" inputmode="decimal">
+          <small data-i18n="h_netmask"></small>
+        </label>
+        <label><span data-i18n="f_interface"></span>
+          <select name="interface"></select>
+          <small data-i18n="h_interface"></small>
+        </label>
+        <fieldset>
+          <legend data-i18n="f_methods"></legend>
+          <label class="check"><input type="checkbox" name="m_global"> <span data-i18n="m_global"></span></label>
+          <label class="check"><input type="checkbox" name="m_directed"> <span data-i18n="m_directed"></span></label>
+          <label class="check"><input type="checkbox" name="m_unicast"> <span data-i18n="m_unicast"></span></label>
+        </fieldset>
+        <label class="check"><input type="checkbox" name="icmp"> <span data-i18n="f_icmp"></span></label>
+        <label><span data-i18n="f_ports"></span>
+          <input name="checkPorts" placeholder="22, 3389" inputmode="numeric">
+          <small data-i18n="h_ports"></small>
+        </label>
+        <div class="row">
+          <label><span data-i18n="f_timeout"></span>
+            <input name="timeoutSec" type="number" min="10" max="600" inputmode="numeric">
+          </label>
+          <label><span data-i18n="f_retry"></span>
+            <input name="retrySec" type="number" min="2" max="60" inputmode="numeric">
+          </label>
+        </div>
+      </details>
+
+      <p class="err" id="deviceError" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn danger" id="btnDelete" hidden data-i18n="delete"></button>
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="btnDeviceCancel" data-i18n="cancel"></button>
+        <button type="submit" class="btn primary" data-i18n="save"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="passwordDialog">
+    <form id="passwordForm" method="dialog" autocomplete="off">
+      <h2 data-i18n="password"></h2>
+      <label><span data-i18n="f_current"></span>
+        <input name="current" type="password" required autocomplete="current-password">
+      </label>
+      <label><span data-i18n="f_new"></span>
+        <input name="new" type="password" required minlength="10" maxlength="128" autocomplete="new-password">
+      </label>
+      <label><span data-i18n="f_repeat"></span>
+        <input name="repeat" type="password" required minlength="10" maxlength="128" autocomplete="new-password">
+      </label>
+      <p class="err" id="passwordError" role="alert"></p>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="btnPasswordCancel" data-i18n="cancel"></button>
+        <button type="submit" class="btn primary" data-i18n="save"></button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>
